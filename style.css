@@ -212,3 +212,7 @@ button { font: inherit; color: inherit; }
 /* subject switcher between the question banks */
 .seg.banks { margin-bottom: 26px; }
 .seg.banks button { font-weight: 700; }
+
+/* marks chip (mock papers) */
+.mk { display: inline-block; font-family: var(--f-mono); font-size: 12px; font-weight: 600; color: var(--metal);
+  background: var(--metal-soft); border-radius: 6px; padding: 1px 7px; margin-right: 8px; vertical-align: 1px; }

@@ -75,14 +75,39 @@
       extraBtn: "Notation traps",
       extraNote: "Symbols the course uses for two different things.",
     },
+    mock: {
+      id: "mock",
+      tab: "Mock exams (95 marks)",
+      data: window.QUIZ_MOCK,
+      key: "mock-mcq.v1",
+      defaults: { mode: "test", shuffle: false },
+      docTitle: "Mock Exams, 95 marks",
+      title: "Mock exams in the real format",
+      thin: "3 papers × 50 questions · 45 × 2 marks + 5 × 1 mark = 95 · no calculator",
+      lede: "Each paper mixes digital (ASIC flow, STA, RTL and verification) and analog (devices, parasitics, layout and the LDO), as the test does. About 40% are short numericals, and the numbers are chosen so you can work them by hand. Test mode, a running clock and a score in marks, out of 95. These are new questions, not repeats from the two practice banks.",
+      parts: [
+        { id: "P1", title: "Paper 1", src: "Q1–22 digital, Q23–45 analog, Q46–50 one-mark." },
+        { id: "P2", title: "Paper 2", src: "Q1–22 digital, Q23–45 analog, Q46–50 one-mark." },
+        { id: "P3", title: "Paper 3", src: "Q1–22 digital, Q23–45 analog, Q46–50 one-mark." },
+      ],
+      partBtn: (count) => `Start paper (${count} Q · 95 marks)`,
+      src: null,
+      fmtRef: (ref) => text(ref),
+      qnote: (q) => `Paper ${q.p}, question ${q.k}.`,
+      ok: "Correct.",
+      bad: (L) => `Wrong. The answer is ${L}.`,
+      clean: "Full marks.",
+      extraBtn: "No-calculator toolkit",
+      extraNote: "Values and unit shortcuts that make the numericals quick by hand.",
+    },
   };
 
   /* ---------- active bank + per-viewer progress (never required) ---------- */
   let B, D, Q, SEC, byN, secById, store, SRC, PARTS;
-  function loadStore(key) {
+  function loadStore(key, defaults) {
     let saved = {};
     try { saved = JSON.parse(localStorage.getItem(key)) || {}; } catch (e) { /* private mode */ }
-    return Object.assign({ mode: "learn", shuffle: true, hist: {} }, saved);
+    return Object.assign({ mode: "learn", shuffle: true, hist: {} }, defaults || {}, saved);
   }
   function save() {
     try { localStorage.setItem(B.key, JSON.stringify(store)); } catch (e) { /* private mode */ }
@@ -92,7 +117,7 @@
     D = B.data; Q = D.questions; SEC = D.sections;
     byN = new Map(Q.map((q) => [q.n, q]));
     secById = new Map(SEC.map((s) => [s.id, s]));
-    store = loadStore(B.key);
+    store = loadStore(B.key, B.defaults);
     SRC = B.src || Object.fromEntries(SEC.map((s) => [s.id, s.src]));
     PARTS = B.parts;
     document.title = B.docTitle;
@@ -133,10 +158,23 @@
     if (store.shuffle || forceShuffle) shuffle(ids);
     const perm = {};
     ids.forEach((n) => { perm[n] = shuffle([0, 1, 2, 3]); });
-    run = { ids, i: 0, mode: store.mode, label, perm, pick: {} };
+    run = { ids, i: 0, mode: store.mode, label, perm, pick: {}, t0: Date.now() };
     renderQ();
     app.focus({ preventScroll: true });
   }
+
+  /* ---------- marks and elapsed time (mock bank) ---------- */
+  const marksOf = (n) => byN.get(n).m || 1;
+  const hasMarks = () => Q.some((q) => q.m);
+  function fmtTime(ms) {
+    const s = Math.floor(ms / 1000), h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+    const ss = String(s % 60).padStart(2, "0");
+    return h ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
+  }
+  setInterval(() => {
+    const el = document.getElementById("clock");
+    if (el && run && !run.done) el.textContent = fmtTime(Date.now() - run.t0);
+  }, 1000);
 
   /* ---------- clock waveform: one cycle per question ---------- */
   function drawWave() {
@@ -224,10 +262,11 @@
 
     setView(`
       <div class="qhead">
-        <p class="qcount">Question <b>${run.i + 1}</b> of ${run.ids.length}</p>
+        <p class="qcount">Question <b>${run.i + 1}</b> of ${run.ids.length}${q.m
+          ? ` · <span title="Time since you started">⏱ <span id="clock">${fmtTime(Date.now() - run.t0)}</span></span>` : ""}</p>
         <button class="btn ghost" data-act="home">All sections</button>
       </div>
-      <p class="qsec">${secById.get(q.s).title}</p>
+      <p class="qsec">${q.m ? `<span class="mk">${q.m} mark${q.m > 1 ? "s" : ""}</span> Paper ${q.p}, Q${q.k} · ` : ""}${secById.get(q.s).title}</p>
       <h1 class="stem">${q.q}</h1>
       <div class="opts" role="group" aria-label="Options">${opts}</div>
       ${report}
@@ -285,7 +324,9 @@
       const ids = (learn ? attempted : run.ids).filter((n) => byN.get(n).s === s.id);
       if (!ids.length) return;
       const r = ids.filter((n) => run.pick[n] === byN.get(n).a).length;
-      secRows.push(`<tr><td>${s.title}</td><td class="n"><b>${r}</b> / ${ids.length}</td></tr>`);
+      const multi = new Set((learn ? attempted : run.ids).map((n) => byN.get(n).p)).size > 1;
+      const label = multi && byN.get(ids[0]).p ? `Paper ${byN.get(ids[0]).p}: ${s.title}` : s.title;
+      secRows.push(`<tr><td>${label}</td><td class="n"><b>${r}</b> / ${ids.length}</td></tr>`);
     });
 
     const review = wrong.concat(skipped).sort((x, y) => run.ids.indexOf(x) - run.ids.indexOf(y));
@@ -306,13 +347,31 @@
     else if (!review.length) slack = `<p class="slack">${B.clean}</p>`;
     else slack = `<p class="slack bad">${pct}% correct. ${wrong.length} wrong${skipped.length ? `, ${skipped.length} skipped` : ""}.</p>`;
 
+    // marks view: score out of the paper's marks (test: every question counts; learn: answered ones)
+    const marked = hasMarks();
+    const pool = learn ? attempted : run.ids;
+    const gotM = right.reduce((a, n) => a + marksOf(n), 0);
+    const totM = pool.reduce((a, n) => a + marksOf(n), 0);
+    const took = fmtTime(Date.now() - run.t0);
+    if (marked) {
+      for (const m of [2, 1]) {
+        const ids = pool.filter((n) => marksOf(n) === m);
+        if (!ids.length) continue;
+        const r = ids.filter((n) => run.pick[n] === byN.get(n).a).length;
+        secRows.push(`<tr><td>${m}-mark questions</td><td class="n"><b>${r * m}</b> / ${ids.length * m} marks</td></tr>`);
+      }
+    }
+
     setView(`
       <div class="qhead">
         <p class="qcount">${run.label}, ${learn ? "learn" : "test"} mode</p>
         <button class="btn ghost" data-act="home">All sections</button>
       </div>
       <div class="score">
-        <p class="big">${right.length}<small> / ${total}</small></p>
+        ${marked
+          ? `<p class="big">${gotM}<small> / ${totM} marks</small></p>
+             <p class="tally"><b>${right.length}</b> of ${total} questions right · time ${took}</p>`
+          : `<p class="big">${right.length}<small> / ${total}</small></p>`}
         ${slack}
       </div>
       <div class="actions">
@@ -352,7 +411,7 @@
       }).join("");
       const count = Q.filter((q) => secById.get(q.s).part === p.id).length;
       return `<section class="part">
-        <div class="part-head"><h2>${p.title}</h2><button class="btn" data-part="${p.id}">Run all ${count}</button></div>
+        <div class="part-head"><h2>${p.title}</h2><button class="btn${B.partBtn ? " primary" : ""}" data-part="${p.id}">${B.partBtn ? B.partBtn(count) : `Run all ${count}`}</button></div>
         <p class="src">${p.src} ${count} questions.</p>
         <ul class="sections">${secs}</ul>
       </section>`;
@@ -364,7 +423,7 @@
     setView(`
       <nav class="seg banks" role="group" aria-label="Subject">${tabs}</nav>
       <header class="masthead">
-        <h1>${B.title}<span class="thin">${total} practice questions for the MCQ test</span></h1>
+        <h1>${B.title}<span class="thin">${B.thin || `${total} practice questions for the MCQ test`}</span></h1>
         <p class="lede">${B.lede}</p>
         <p class="tally">${answered
           ? `You have answered <b>${answered}</b> of ${total} and got <b>${right}</b> right. Progress is saved in this browser.`
@@ -395,6 +454,7 @@
     view = "errata";
     waveWrap.hidden = true;
     if (B.id === "analog") return renderTraps();
+    if (B.id === "mock") return renderToolkit();
     setView(`
       <div class="qhead"><p class="qcount">Errata</p><button class="btn ghost" data-act="home">All sections</button></div>
       <section class="errata">
@@ -433,6 +493,28 @@
           <li><b>Miller:</b> C<sub>in</sub> = C<sub>gs</sub> + C<sub>gd</sub>(1 − A<sub>v</sub>). A<sub>v</sub> is negative for a common-source stage, so the factor is 1 + |A<sub>v</sub>|.</li>
           <li><b>Delays:</b> 0.69RC is the 50% step delay of a lumped RC; ½RC is the Elmore delay of a uniform distributed wire; plain RC is the time constant τ.</li>
           <li><b>Mismatch signs:</b> ΔI/I ≈ Δβ/β − 2ΔV<sub>T</sub>/V<sub>OV</sub> + ΔV<sub>DS</sub>/V<sub>A</sub>. A higher V<sub>T</sub> gives less current, hence the minus sign.</li>
+        </ul>
+      </section>`);
+    app.focus({ preventScroll: true });
+  }
+
+  function renderToolkit() {
+    setView(`
+      <div class="qhead"><p class="qcount">No-calculator toolkit</p><button class="btn ghost" data-act="home">All sections</button></div>
+      <section class="errata">
+        <h1 class="stem">Numbers to carry into the exam</h1>
+        <p class="lede">Every numerical in the mock papers can be done with these values. Learn the unit shortcuts and most of the arithmetic goes away.</p>
+        <ul>
+          <li><b>Unit shortcuts:</b> mA × Ω = mV · µA × kΩ = mV · kΩ × pF = ns · kΩ × fF = ps · Ω × pF = ps · nC ÷ A = ns · mA ÷ mV = S. So 26 mV / 2 mA = 13 Ω, and 50 kΩ × 100 fF = 5 ns.</li>
+          <li><b>Thermal voltage:</b> kT/q ≈ 25.85 mV ≈ 26 mV at 300 K. 2.3 V<sub>T</sub> ≈ 60 mV: a diode with n = 1 changes 10× per 60 mV, and S = 59.6n mV/dec.</li>
+          <li><b>Logs:</b> ln 10 ≈ 2.303, ln 2 ≈ 0.693, log<sub>10</sub>2 ≈ 0.301. 20 dB = 10×, 40 dB = 100×, 60 dB = 1000×, 6 dB ≈ 2×.</li>
+          <li><b>Exponentials:</b> e<sup>−0.5</sup> ≈ 0.607, e<sup>−1</sup> ≈ 0.368, e<sup>−2</sup> ≈ 0.135, e<sup>−3</sup> ≈ 0.050, e<sup>3</sup> ≈ 20, e<sup>20</sup> ≈ 4.85×10<sup>8</sup>.</li>
+          <li><b>Roots:</b> √2 ≈ 1.414, √3 ≈ 1.732, √5 ≈ 2.236, √10 ≈ 3.162, √0.7 ≈ 0.837, √1.7 ≈ 1.304. To halve σ ∝ 1/√(WL), quadruple the area.</li>
+          <li><b>Poles:</b> 1/(2π) ≈ 0.159, so f = 0.159/RC. RC = 1 µs gives 159 kHz; RC = 1 ns gives 159 MHz; RC = 100 ns gives 1.59 MHz.</li>
+          <li><b>Scaling laws:</b> P<sub>dyn</sub> ∝ V²f · wire delay ∝ L² · MTTF ∝ J<sup>−2</sup> · intrinsic gain = 2/(λV<sub>OV</sub>) · I<sub>D</sub> ∝ V<sub>OV</sub>² (square law) or ∝ V<sub>OV</sub> (velocity saturation) · delay ∝ (V<sub>ref</sub>/V)<sup>1.5</sup>, so 1% IR drop ≈ 1.5% slower.</li>
+          <li><b>Lengths:</b> 1 nm = 10<sup>−7</sup> cm, 1 µm = 10<sup>−4</sup> cm, 1 µm² = 10<sup>−8</sup> cm². Squares = L/W.</li>
+          <li><b>STA signs:</b> setup slack = RAT − AAT; hold slack = AAT − RHT. Uncertainty is subtracted from setup and added to the hold requirement. Positive skew helps setup and hurts hold. f<sub>max</sub> = 1/(T − WNS).</li>
+          <li><b>Statistics:</b> N equal independent σ add as √N·σ. 3σ = 99.87%. CRPR credit = common delay × (late − early), with no ÷2.</li>
         </ul>
       </section>`);
     app.focus({ preventScroll: true });
