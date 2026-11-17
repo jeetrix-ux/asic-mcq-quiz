@@ -1,57 +1,113 @@
 (() => {
   "use strict";
 
-  const D = window.QUIZ;
-  const Q = D.questions;
-  const SEC = D.sections;
-  const byN = new Map(Q.map((q) => [q.n, q]));
-  const secById = new Map(SEC.map((s) => [s.id, s]));
   const app = document.getElementById("app");
   const waveWrap = document.getElementById("wave-wrap");
   const wave = document.getElementById("wave");
   const LETTERS = "ABCD";
 
-  const PARTS = [
-    { id: "A", title: "ASIC design flow", src: "Part 1 of the notes: the 74 flow topics, from spec to production ramp." },
-    { id: "B", title: "Static timing analysis", src: "Part 2: the 147-slide STA reference." },
-    { id: "C", title: "RTL design and verification", src: "Part 3: RTL design basics and design-verification basics." },
-  ];
-  const SRC = {
-    a1: "Topics 01–10", a2: "Topics 11–16", a3: "Topics 17–20", a4: "Topics 21–25",
-    a5: "Topics 26–36", a6: "Topics 37–48", a7: "Topics 49–74",
-    b1: "Slides 2–25", b2: "Slides 27–33", b3: "Slides 34–49", b4: "Slides 51–61",
-    b5: "Slides 63–73", b6: "Slides 74–91", b7: "Slides 93–119", b8: "Slides 121–128",
-    b9: "Slides 130–137", b10: "Slides 139–147",
-    c1: "Part 3A, topics 01–15", c2: "Part 3B, topics 01–18",
-  };
+  const decoder = document.createElement("textarea");
+  function text(html) { decoder.innerHTML = html; return decoder.value; }
+
+  /* ---------- question banks ---------- */
   const PARTNAME = {
     P1: "Part 1, ASIC flow", STA: "Part 2, STA",
     P3A: "Part 3A, RTL design", P3B: "Part 3B, verification",
   };
+  const BANKS = {
+    asic: {
+      id: "asic",
+      tab: "ASIC flow, STA, verification",
+      data: window.QUIZ,
+      key: "asic-mcq.v1",
+      docTitle: "ASIC MCQ Practice",
+      title: "ASIC flow, STA and verification",
+      lede: "Every answer comes with a one-line solution and the topic or slide of the notes it is from. Pick a section below, or run all 200. Question numbers match the PDF practice sheet.",
+      parts: [
+        { id: "A", title: "ASIC design flow", src: "Part 1 of the notes: the 74 flow topics, from spec to production ramp." },
+        { id: "B", title: "Static timing analysis", src: "Part 2: the 147-slide STA reference." },
+        { id: "C", title: "RTL design and verification", src: "Part 3: RTL design basics and design-verification basics." },
+      ],
+      src: {
+        a1: "Topics 01–10", a2: "Topics 11–16", a3: "Topics 17–20", a4: "Topics 21–25",
+        a5: "Topics 26–36", a6: "Topics 37–48", a7: "Topics 49–74",
+        b1: "Slides 2–25", b2: "Slides 27–33", b3: "Slides 34–49", b4: "Slides 51–61",
+        b5: "Slides 63–73", b6: "Slides 74–91", b7: "Slides 93–119", b8: "Slides 121–128",
+        b9: "Slides 130–137", b10: "Slides 139–147",
+        c1: "Part 3A, topics 01–15", c2: "Part 3B, topics 01–18",
+      },
+      fmtRef(ref) {
+        const r = text(ref);
+        const m = r.match(/^(P1|STA|P3A|P3B)\s*·\s*(.*)$/);
+        if (!m) return r;
+        const rest = m[2]
+          .replace(/\bT(\d+)/g, "topic $1")
+          .replace(/\bS(\d+)/g, "slide $1")
+          .replace("(notes)", "(speaker notes)");
+        return `${PARTNAME[m[1]]}, ${rest}`;
+      },
+      qnote: (q) => `Question ${q.n} in the PDF.`,
+      ok: "slack: met. Correct.",
+      bad: (L) => `slack: violated. The answer is ${L}.`,
+      clean: "Timing closed: zero violations.",
+      extraBtn: "Where the slides are wrong",
+      extraNote: "The questions use the correct values; this lists both versions.",
+    },
+    analog: {
+      id: "analog",
+      tab: "Analog design",
+      data: window.QUIZ_ANALOG,
+      key: "analog-mcq.v1",
+      docTitle: "Analog Design MCQ Practice",
+      title: "Analog design: requirements to GDS",
+      lede: "200 of the most likely questions: device physics, parasitics, matching, latch-up, the LDO and the chip flow. More than half are small numericals with new numbers. Every answer has a one-line working and the section of the short notes it is from.",
+      parts: [
+        { id: "A", title: "Chip workflow: requirements to GDS", src: "Part I of the notes: the 18 flow chapters." },
+        { id: "B", title: "Device physics and parasitics", src: "Part II: diode, MOSFET, second-order effects, interconnect and reliability." },
+        { id: "C", title: "Advanced layout and the LDO", src: "Part III: latch-up, matching, WPE, STI/LOD and the low-dropout regulator." },
+      ],
+      src: null, // taken from each section's own src field
+      fmtRef: (ref) => `Short notes §${text(ref)}`,
+      qnote: (q) => `Question ${q.n} of the analog bank.`,
+      ok: "In saturation. Correct.",
+      bad: (L) => `Cut off. The answer is ${L}.`,
+      clean: "Zero offset: no mistakes.",
+      extraBtn: "Notation traps",
+      extraNote: "Symbols the course uses for two different things.",
+    },
+  };
 
-  /* ---------- storage: per-viewer progress, never required ---------- */
-  const KEY = "asic-mcq.v1";
-  function load() {
-    try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch (e) { return {}; }
+  /* ---------- active bank + per-viewer progress (never required) ---------- */
+  let B, D, Q, SEC, byN, secById, store, SRC, PARTS;
+  function loadStore(key) {
+    let saved = {};
+    try { saved = JSON.parse(localStorage.getItem(key)) || {}; } catch (e) { /* private mode */ }
+    return Object.assign({ mode: "learn", shuffle: true, hist: {} }, saved);
   }
-  const store = Object.assign({ mode: "learn", shuffle: true, hist: {} }, load());
   function save() {
-    try { localStorage.setItem(KEY, JSON.stringify(store)); } catch (e) { /* private mode */ }
+    try { localStorage.setItem(B.key, JSON.stringify(store)); } catch (e) { /* private mode */ }
   }
-
-  /* ---------- helpers ---------- */
-  const decoder = document.createElement("textarea");
-  function text(html) { decoder.innerHTML = html; return decoder.value; }
-  function fmtRef(ref) {
-    const r = text(ref);
-    const m = r.match(/^(P1|STA|P3A|P3B)\s*·\s*(.*)$/);
-    if (!m) return r;
-    const rest = m[2]
-      .replace(/\bT(\d+)/g, "topic $1")
-      .replace(/\bS(\d+)/g, "slide $1")
-      .replace("(notes)", "(speaker notes)");
-    return `${PARTNAME[m[1]]}, ${rest}`;
+  function useBank(id) {
+    B = BANKS[id] && BANKS[id].data ? BANKS[id] : BANKS.asic;
+    D = B.data; Q = D.questions; SEC = D.sections;
+    byN = new Map(Q.map((q) => [q.n, q]));
+    secById = new Map(SEC.map((s) => [s.id, s]));
+    store = loadStore(B.key);
+    SRC = B.src || Object.fromEntries(SEC.map((s) => [s.id, s.src]));
+    PARTS = B.parts;
+    document.title = B.docTitle;
+    try { localStorage.setItem("mcq.bank", B.id); } catch (e) { /* private mode */ }
+    const want = B.id === "asic" ? "" : "#" + B.id;
+    if (location.hash !== want) history.replaceState(null, "", location.pathname + location.search + want);
   }
+  function initialBank() {
+    const h = location.hash.replace("#", "");
+    if (BANKS[h]) return h;
+    try { const s = localStorage.getItem("mcq.bank"); if (BANKS[s]) return s; } catch (e) { /* ignore */ }
+    return "asic";
+  }
+  useBank(initialBank());
+  const fmtRef = (ref) => B.fmtRef(ref);
   function shuffle(a) {
     for (let i = a.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
@@ -144,9 +200,9 @@
       const ok = picked === q.a;
       const correctLetter = LETTERS[order.indexOf(q.a)];
       report = `<div class="report${ok ? "" : " bad"}" role="status">
-        <p class="verdict">${ok ? "slack: met. Correct." : `slack: violated. The answer is ${correctLetter}.`}</p>
+        <p class="verdict">${ok ? B.ok : B.bad(correctLetter)}</p>
         <p class="why">${q.why}</p>
-        <p class="from"><span>From </span>${fmtRef(q.ref)}<span>. Question ${q.n} in the PDF.</span></p>
+        <p class="from"><span>From </span>${fmtRef(q.ref)}<span>. ${B.qnote(q)}</span></p>
       </div>`;
     }
 
@@ -241,13 +297,13 @@
         <p class="mrow yours"><span class="lab">You chose</span><span>${p === undefined ? "nothing (skipped)" : q.o[p]}</span></p>
         <p class="mrow ans"><span class="lab">Answer</span><span>${q.o[q.a]}</span></p>
         <p class="why">${q.why}</p>
-        <p class="from">${fmtRef(q.ref)}. Question ${q.n} in the PDF.</p>
+        <p class="from">${fmtRef(q.ref)}. ${B.qnote(q)}</p>
       </div>`;
     }).join("");
 
     let slack;
     if (!total) slack = `<p class="slack">No questions answered yet.</p>`;
-    else if (!review.length) slack = `<p class="slack">Timing closed: zero violations.</p>`;
+    else if (!review.length) slack = `<p class="slack">${B.clean}</p>`;
     else slack = `<p class="slack bad">${pct}% correct. ${wrong.length} wrong${skipped.length ? `, ${skipped.length} skipped` : ""}.</p>`;
 
     setView(`
@@ -302,13 +358,16 @@
       </section>`;
     }).join("");
 
+    const total = Q.length;
+    const tabs = Object.values(BANKS).filter((b) => b.data).map((b) =>
+      `<button data-bank="${b.id}" aria-pressed="${b.id === B.id}">${b.tab}<small>${b.data.questions.length} questions</small></button>`).join("");
     setView(`
+      <nav class="seg banks" role="group" aria-label="Subject">${tabs}</nav>
       <header class="masthead">
-        <h1>ASIC flow, STA and verification<span class="thin">200 practice questions for the MCQ test</span></h1>
-        <p class="lede">Every answer comes with a one-line solution and the topic or slide of the notes it is from.
-        Pick a section below, or run all 200. Question numbers match the PDF practice sheet.</p>
+        <h1>${B.title}<span class="thin">${total} practice questions for the MCQ test</span></h1>
+        <p class="lede">${B.lede}</p>
         <p class="tally">${answered
-          ? `You have answered <b>${answered}</b> of 200 and got <b>${right}</b> right. Progress is saved in this browser.`
+          ? `You have answered <b>${answered}</b> of ${total} and got <b>${right}</b> right. Progress is saved in this browser.`
           : "Your progress is saved in this browser."}</p>
       </header>
       <div class="controls">
@@ -318,15 +377,15 @@
         </div>
         <label class="check"><input type="checkbox" id="shuf" ${store.shuffle ? "checked" : ""}> Shuffle the question order</label>
         <div class="actions">
-          <button class="btn primary" data-act="all">Start all 200</button>
+          <button class="btn primary" data-act="all">Start all ${total}</button>
           <button class="btn" data-act="quick">Random 25</button>
           <button class="btn" data-act="missed" ${missed ? "" : "disabled"}>Retry missed (${missed})</button>
-          <button class="btn" data-act="unseen" ${unseen && unseen < 200 ? "" : "disabled"}>Not tried yet (${unseen})</button>
+          <button class="btn" data-act="unseen" ${unseen && unseen < total ? "" : "disabled"}>Not tried yet (${unseen})</button>
         </div>
       </div>
       ${parts}
       <footer class="foot">
-        <p><button class="btn ghost" data-act="errata">Where the slides are wrong</button> The questions use the correct values; this lists both versions.</p>
+        <p><button class="btn ghost" data-act="errata">${B.extraBtn}</button> ${B.extraNote}</p>
         <p><button class="btn ghost" data-act="reset" ${answered ? "" : "disabled"}>${resetArmed ? "Click again to erase all progress" : "Erase my progress"}</button></p>
       </footer>`);
   }
@@ -335,6 +394,7 @@
   function renderErrata() {
     view = "errata";
     waveWrap.hidden = true;
+    if (B.id === "analog") return renderTraps();
     setView(`
       <div class="qhead"><p class="qcount">Errata</p><button class="btn ghost" data-act="home">All sections</button></div>
       <section class="errata">
@@ -358,11 +418,32 @@
     app.focus({ preventScroll: true });
   }
 
+  function renderTraps() {
+    setView(`
+      <div class="qhead"><p class="qcount">Notation traps</p><button class="btn ghost" data-act="home">All sections</button></div>
+      <section class="errata">
+        <h1 class="stem">Symbols that mean two things</h1>
+        <p class="lede">The course document reuses a few symbols. Read the context before you plug numbers in. Every worked numerical in the document was recomputed and is correct.</p>
+        <ul>
+          <li><b>V<sub>T</sub>:</b> the <i>thermal voltage</i> kT/q ≈ 25.85 mV in the diode chapters, but the <i>threshold voltage</i> in the MOSFET chapters, where the thermal voltage is written V<sub>Thermal</sub>.</li>
+          <li><b>n:</b> the diode ideality factor (1–2), the subthreshold slope factor (S = 59.6n mV/dec), and the current-density exponent in Black's equation (MTTF ∝ J<sup>−n</sup>).</li>
+          <li><b>LOD vs LDO:</b> length of diffusion is a layout-dependent effect; a low-dropout regulator is a circuit.</li>
+          <li><b>β:</b> μC<sub>ox</sub>W/L in the MOSFET chapters, but the feedback factor R<sub>2</sub>/(R<sub>1</sub> + R<sub>2</sub>) in the LDO. And α in latch-up is the common-base gain, while α in P<sub>dyn</sub> = αCV²f is the switching activity.</li>
+          <li><b>Junction capacitance:</b> written C<sub>j0</sub>/(1 − V<sub>D</sub>/V<sub>bi</sub>)<sup>m</sup> in Part II and C<sub>j0</sub>/(1 + V<sub>R</sub>/Φ)<sup>m</sup> in Part I. Same formula with V<sub>D</sub> = −V<sub>R</sub>.</li>
+          <li><b>Miller:</b> C<sub>in</sub> = C<sub>gs</sub> + C<sub>gd</sub>(1 − A<sub>v</sub>). A<sub>v</sub> is negative for a common-source stage, so the factor is 1 + |A<sub>v</sub>|.</li>
+          <li><b>Delays:</b> 0.69RC is the 50% step delay of a lumped RC; ½RC is the Elmore delay of a uniform distributed wire; plain RC is the time constant τ.</li>
+          <li><b>Mismatch signs:</b> ΔI/I ≈ Δβ/β − 2ΔV<sub>T</sub>/V<sub>OV</sub> + ΔV<sub>DS</sub>/V<sub>A</sub>. A higher V<sub>T</sub> gives less current, hence the minus sign.</li>
+        </ul>
+      </section>`);
+    app.focus({ preventScroll: true });
+  }
+
   /* ---------- events ---------- */
   app.addEventListener("click", (ev) => {
     const t = ev.target.closest("button");
     if (!t || t.disabled) return;
     if (t.dataset.k !== undefined) return choose(+t.dataset.k);
+    if (t.dataset.bank) { if (t.dataset.bank !== B.id) { run = null; resetArmed = false; useBank(t.dataset.bank); } return renderHome(); }
     if (t.dataset.mode) { store.mode = t.dataset.mode; save(); return renderHome(); }
     if (t.dataset.sec) { const s = secById.get(t.dataset.sec); return start(Q.filter((q) => q.s === s.id).map((q) => q.n), s.title); }
     if (t.dataset.part) {
@@ -372,7 +453,7 @@
     const act = t.dataset.act;
     if (act !== "reset") resetArmed = false;
     switch (act) {
-      case "all": return start(Q.map((q) => q.n), "All 200");
+      case "all": return start(Q.map((q) => q.n), `All ${Q.length}`);
       case "quick": return start(shuffle(Q.map((q) => q.n)).slice(0, 25), "Random 25", true);
       case "missed": return start(missedIds(), "Missed questions");
       case "unseen": return start(unseenIds(), "Not tried yet");
@@ -402,6 +483,11 @@
     if ((k === "enter" && !onButton) || k === "arrowright") { ev.preventDefault(); return next(); }
     if (k === "arrowleft") { ev.preventDefault(); return prev(); }
     if (k === "escape") { run = null; renderHome(); }
+  });
+
+  window.addEventListener("hashchange", () => {
+    const h = location.hash.replace("#", "") || "asic";
+    if (BANKS[h] && h !== B.id) { run = null; useBank(h); renderHome(); }
   });
 
   renderHome();
